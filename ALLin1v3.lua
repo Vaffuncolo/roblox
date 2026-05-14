@@ -1,12 +1,10 @@
 --[[
-    Unified Script Hub
-    Combines best features from both scripts:
-    - Smooth modern UI with tabs (Scripts / Tools / Settings)
-    - Draggable system with Tween animations
-    - 11 external scripts + built-in tools (NoClip, FullBright, Infinite Jump, etc.)
-    - Search bar, notifications, keyboard shortcuts (RightCtrl / F6)
-    - Proper cleanup of loops to avoid memory leaks
-    - English comments throughout
+    Unified Script Hub v2.1 - Fixed & Enhanced
+    Fixes:
+    - Minimize & Close buttons now properly connected
+    - Mini bar draggable (drag on frame, not just button)
+    - Added Freeze tool (anchors character in place)
+    - Proper cleanup of all connections
 --]]
 
 local Players = game:GetService("Players")
@@ -20,7 +18,6 @@ local Lighting = game:GetService("Lighting")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- UI references
 local mainScreenGui = nil
 local menuElements = nil
 local miniBar = nil
@@ -29,13 +26,22 @@ local miniBar = nil
 local noclipEnabled = false
 local fullbrightEnabled = false
 local infiniteJumpEnabled = false
+local freezeEnabled = false
 
--- Store loop connections for proper cleanup
+-- Connections for cleanup
 local noclipConnection = nil
-local originalLighting = {Brightness = Lighting.Brightness, GlobalShadows = Lighting.GlobalShadows}
+local freezeConnection = nil
+local frozenPosition = nil
+
+local originalLighting = {
+    Brightness = Lighting.Brightness,
+    ClockTime = Lighting.ClockTime,
+    FogEnd = Lighting.FogEnd,
+    GlobalShadows = Lighting.GlobalShadows
+}
 
 --=============================
--- HELPER: Notifications
+-- NOTIFICATIONS
 --=============================
 local function Notify(title, text, duration)
     pcall(function()
@@ -48,41 +54,48 @@ local function Notify(title, text, duration)
 end
 
 --=============================
--- TWEEN HELPERS (Smooth animations)
+-- TWEEN HELPERS
 --=============================
 local function SmoothSize(obj, targetSize, duration)
-    local tween = TweenService:Create(obj, TweenInfo.new(duration or 0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-        Size = targetSize
-    })
+    local tween = TweenService:Create(
+        obj,
+        TweenInfo.new(duration or 0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+        {Size = targetSize}
+    )
     tween:Play()
     return tween
 end
 
 local function SmoothPosition(obj, targetPos, duration)
-    local tween = TweenService:Create(obj, TweenInfo.new(duration or 0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-        Position = targetPos
-    })
+    local tween = TweenService:Create(
+        obj,
+        TweenInfo.new(duration or 0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+        {Position = targetPos}
+    )
     tween:Play()
     return tween
 end
 
 local function SmoothColor(obj, targetColor, duration)
-    local tween = TweenService:Create(obj, TweenInfo.new(duration or 0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-        BackgroundColor3 = targetColor
-    })
+    local tween = TweenService:Create(
+        obj,
+        TweenInfo.new(duration or 0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+        {BackgroundColor3 = targetColor}
+    )
     tween:Play()
     return tween
 end
 
 --=============================
--- DRAG SYSTEM (with tweens)
+-- DRAG SYSTEM
 --=============================
 local function MakeDraggable(frame)
     local dragging = false
     local dragInput, dragStart, startPos
 
     frame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
             startPos = frame.Position
@@ -95,7 +108,8 @@ local function MakeDraggable(frame)
     end)
 
     frame.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch then
             dragInput = input
         end
     end)
@@ -103,17 +117,16 @@ local function MakeDraggable(frame)
     UserInputService.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
             local delta = input.Position - dragStart
-            local targetPos = UDim2.new(
+            frame.Position = UDim2.new(
                 startPos.X.Scale, startPos.X.Offset + delta.X,
                 startPos.Y.Scale, startPos.Y.Offset + delta.Y
             )
-            SmoothPosition(frame, targetPos, 0.08)
         end
     end)
 end
 
 --=============================
--- UI CORNER & SHADOW
+-- UI HELPERS
 --=============================
 local function AddCorner(parent, radius)
     local corner = Instance.new("UICorner")
@@ -140,10 +153,73 @@ local function AddShadow(parent)
 end
 
 --=============================
--- CREATE MAIN MENU
+-- MINI BAR (FIXED DRAGGING)
+--=============================
+local function createMiniBar()
+    if miniBar then miniBar:Destroy() end
+
+    miniBar = Instance.new("Frame")
+    miniBar.Name = "MiniBar"
+    miniBar.Size = UDim2.new(0, 50, 0, 50)
+    miniBar.Position = UDim2.new(0, 10, 0.5, -25)
+    miniBar.BackgroundColor3 = Color3.fromRGB(22, 22, 35)
+    miniBar.BorderSizePixel = 0
+    miniBar.Active = true
+    miniBar.Parent = mainScreenGui
+    AddCorner(miniBar, 25)
+    AddShadow(miniBar)
+
+    -- Make the frame itself draggable FIRST
+    MakeDraggable(miniBar)
+
+    -- The expand button sits on top but does NOT block drag
+    local expandBtn = Instance.new("TextButton")
+    expandBtn.Name = "ExpandBtn"
+    expandBtn.Size = UDim2.new(0.8, 0, 0.8, 0)
+    expandBtn.Position = UDim2.new(0.1, 0, 0.1, 0)
+    expandBtn.BackgroundTransparency = 1
+    expandBtn.Text = "⚡"
+    expandBtn.TextSize = 20
+    expandBtn.TextColor3 = Color3.fromRGB(130, 170, 255)
+    expandBtn.Font = Enum.Font.GothamBold
+    expandBtn.Parent = miniBar
+
+    expandBtn.MouseButton1Click:Connect(function()
+        if menuElements and menuElements.MainFrame then
+            menuElements.MainFrame.Visible = true
+            menuElements.MainFrame.Size = UDim2.new(0, 0, 0, 0)
+            SmoothSize(menuElements.MainFrame, UDim2.new(0, 440, 0, 420), 0.4)
+        end
+        if miniBar then miniBar:Destroy() end
+        miniBar = nil
+    end)
+
+    -- Pulse animation
+    task.spawn(function()
+        while miniBar and miniBar.Parent do
+            local t1 = TweenService:Create(miniBar,
+                TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                {Size = UDim2.new(0, 54, 0, 54)}
+            )
+            t1:Play()
+            t1.Completed:Wait()
+            if not miniBar or not miniBar.Parent then break end
+
+            local t2 = TweenService:Create(miniBar,
+                TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                {Size = UDim2.new(0, 50, 0, 50)}
+            )
+            t2:Play()
+            t2.Completed:Wait()
+            if not miniBar or not miniBar.Parent then break end
+        end
+    end)
+end
+
+--=============================
+-- MAIN MENU
 --=============================
 local function createMainMenu()
-    -- Remove any existing GUI to avoid duplicates
     local old = PlayerGui:FindFirstChild("UnifiedScriptHub")
     if old then old:Destroy() end
 
@@ -154,32 +230,42 @@ local function createMainMenu()
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     mainScreenGui = ScreenGui
 
-    -- Main frame (initially size 0 for pop-up animation)
+    -- Main frame
     local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
     MainFrame.Size = UDim2.new(0, 0, 0, 0)
     MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
     MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     MainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
     MainFrame.BorderSizePixel = 0
     MainFrame.ClipsDescendants = true
+    MainFrame.Active = true
     MainFrame.Parent = ScreenGui
     AddCorner(MainFrame, 14)
     AddShadow(MainFrame)
 
-    -- Pop-up animation
     task.delay(0.05, function()
         SmoothSize(MainFrame, UDim2.new(0, 440, 0, 420), 0.5)
     end)
 
-    -- Title bar
+    -- Title bar (used for dragging)
     local TitleBar = Instance.new("Frame")
+    TitleBar.Name = "TitleBar"
     TitleBar.Size = UDim2.new(1, 0, 0, 48)
     TitleBar.BackgroundColor3 = Color3.fromRGB(22, 22, 35)
     TitleBar.BorderSizePixel = 0
+    TitleBar.Active = true
     TitleBar.Parent = MainFrame
     AddCorner(TitleBar, 14)
 
-    -- Title label
+    -- Bottom fix for title bar corners
+    local TitleBarFix = Instance.new("Frame")
+    TitleBarFix.Size = UDim2.new(1, 0, 0, 14)
+    TitleBarFix.Position = UDim2.new(0, 0, 1, -14)
+    TitleBarFix.BackgroundColor3 = Color3.fromRGB(22, 22, 35)
+    TitleBarFix.BorderSizePixel = 0
+    TitleBarFix.Parent = TitleBar
+
     local TitleLabel = Instance.new("TextLabel")
     TitleLabel.Size = UDim2.new(1, -120, 1, 0)
     TitleLabel.Position = UDim2.new(0, 16, 0, 0)
@@ -193,6 +279,7 @@ local function createMainMenu()
 
     -- Minimize button
     local MinimizeButton = Instance.new("TextButton")
+    MinimizeButton.Name = "MinBtn"
     MinimizeButton.Size = UDim2.new(0, 32, 0, 32)
     MinimizeButton.Position = UDim2.new(1, -76, 0, 8)
     MinimizeButton.Text = "—"
@@ -202,6 +289,7 @@ local function createMainMenu()
     MinimizeButton.TextSize = 16
     MinimizeButton.BorderSizePixel = 0
     MinimizeButton.AutoButtonColor = false
+    MinimizeButton.ZIndex = 10
     MinimizeButton.Parent = TitleBar
     AddCorner(MinimizeButton, 8)
 
@@ -214,6 +302,7 @@ local function createMainMenu()
 
     -- Close button
     local CloseButton = Instance.new("TextButton")
+    CloseButton.Name = "CloseBtn"
     CloseButton.Size = UDim2.new(0, 32, 0, 32)
     CloseButton.Position = UDim2.new(1, -40, 0, 8)
     CloseButton.Text = "✕"
@@ -223,6 +312,7 @@ local function createMainMenu()
     CloseButton.TextSize = 14
     CloseButton.BorderSizePixel = 0
     CloseButton.AutoButtonColor = false
+    CloseButton.ZIndex = 10
     CloseButton.Parent = TitleBar
     AddCorner(CloseButton, 8)
 
@@ -231,6 +321,27 @@ local function createMainMenu()
     end)
     CloseButton.MouseLeave:Connect(function()
         SmoothColor(CloseButton, Color3.fromRGB(180, 50, 60), 0.2)
+    end)
+
+    -------------------------------------------------
+    -- FIX: Connect Minimize & Close RIGHT HERE
+    -------------------------------------------------
+    MinimizeButton.MouseButton1Click:Connect(function()
+        SmoothSize(MainFrame, UDim2.new(0, 0, 0, 0), 0.35)
+        task.delay(0.35, function()
+            MainFrame.Visible = false
+            createMiniBar()
+        end)
+    end)
+
+    CloseButton.MouseButton1Click:Connect(function()
+        SmoothSize(MainFrame, UDim2.new(0, 0, 0, 0), 0.3)
+        task.delay(0.3, function()
+            if noclipConnection then noclipConnection:Disconnect() end
+            if freezeConnection then freezeConnection:Disconnect() end
+            if miniBar then miniBar:Destroy() end
+            if mainScreenGui then mainScreenGui:Destroy() end
+        end)
     end)
 
     -- Search bar
@@ -242,9 +353,18 @@ local function createMainMenu()
     SearchBar.Parent = MainFrame
     AddCorner(SearchBar, 8)
 
+    local SearchIcon = Instance.new("TextLabel")
+    SearchIcon.Size = UDim2.new(0, 28, 1, 0)
+    SearchIcon.Position = UDim2.new(0, 4, 0, 0)
+    SearchIcon.BackgroundTransparency = 1
+    SearchIcon.Text = "🔍"
+    SearchIcon.TextSize = 13
+    SearchIcon.Font = Enum.Font.Gotham
+    SearchIcon.Parent = SearchBar
+
     local SearchBox = Instance.new("TextBox")
-    SearchBox.Size = UDim2.new(1, -16, 1, 0)
-    SearchBox.Position = UDim2.new(0, 12, 0, 0)
+    SearchBox.Size = UDim2.new(1, -40, 1, 0)
+    SearchBox.Position = UDim2.new(0, 34, 0, 0)
     SearchBox.BackgroundTransparency = 1
     SearchBox.PlaceholderText = "Search scripts..."
     SearchBox.PlaceholderColor3 = Color3.fromRGB(100, 100, 130)
@@ -268,80 +388,44 @@ local function createMainMenu()
     TabLayout.Padding = UDim.new(0, 6)
     TabLayout.Parent = TabBar
 
-    -- Content frames for each tab
-    local ScriptsFrame = Instance.new("ScrollingFrame")
-    ScriptsFrame.Size = UDim2.new(1, -24, 1, -140)
-    ScriptsFrame.Position = UDim2.new(0, 12, 0, 132)
-    ScriptsFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 34)
-    ScriptsFrame.BackgroundTransparency = 0.3
-    ScriptsFrame.BorderSizePixel = 0
-    ScriptsFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-    ScriptsFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    ScriptsFrame.ScrollBarThickness = 4
-    ScriptsFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 130, 255)
-    ScriptsFrame.ClipsDescendants = true
-    ScriptsFrame.Parent = MainFrame
-    AddCorner(ScriptsFrame, 10)
+    -- Content frames
+    local function makeContentFrame(visible)
+        local f = Instance.new("ScrollingFrame")
+        f.Size = UDim2.new(1, -24, 1, -140)
+        f.Position = UDim2.new(0, 12, 0, 132)
+        f.BackgroundColor3 = Color3.fromRGB(22, 22, 34)
+        f.BackgroundTransparency = 0.3
+        f.BorderSizePixel = 0
+        f.CanvasSize = UDim2.new(0, 0, 0, 0)
+        f.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        f.ScrollBarThickness = 4
+        f.ScrollBarImageColor3 = Color3.fromRGB(100, 130, 255)
+        f.ClipsDescendants = true
+        f.Visible = visible
+        f.Parent = MainFrame
+        AddCorner(f, 10)
 
-    local ToolsFrame = Instance.new("ScrollingFrame")
-    ToolsFrame.Size = UDim2.new(1, -24, 1, -140)
-    ToolsFrame.Position = UDim2.new(0, 12, 0, 132)
-    ToolsFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 34)
-    ToolsFrame.BackgroundTransparency = 0.3
-    ToolsFrame.BorderSizePixel = 0
-    ToolsFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-    ToolsFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    ToolsFrame.ScrollBarThickness = 4
-    ToolsFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 130, 255)
-    ToolsFrame.ClipsDescendants = true
-    ToolsFrame.Visible = false
-    ToolsFrame.Parent = MainFrame
-    AddCorner(ToolsFrame, 10)
+        local layout = Instance.new("UIListLayout")
+        layout.Padding = UDim.new(0, 6)
+        layout.Parent = f
 
-    local SettingsFrame = Instance.new("ScrollingFrame")
-    SettingsFrame.Size = UDim2.new(1, -24, 1, -140)
-    SettingsFrame.Position = UDim2.new(0, 12, 0, 132)
-    SettingsFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 34)
-    SettingsFrame.BackgroundTransparency = 0.3
-    SettingsFrame.BorderSizePixel = 0
-    SettingsFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-    SettingsFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    SettingsFrame.ScrollBarThickness = 4
-    SettingsFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 130, 255)
-    SettingsFrame.ClipsDescendants = true
-    SettingsFrame.Visible = false
-    SettingsFrame.Parent = MainFrame
-    AddCorner(SettingsFrame, 10)
-
-    -- Layouts for content
-    local scriptsLayout = Instance.new("UIListLayout")
-    scriptsLayout.Padding = UDim.new(0, 6)
-    scriptsLayout.Parent = ScriptsFrame
-    local toolsLayout = Instance.new("UIListLayout")
-    toolsLayout.Padding = UDim.new(0, 6)
-    toolsLayout.Parent = ToolsFrame
-    local settingsLayout = Instance.new("UIListLayout")
-    settingsLayout.Padding = UDim.new(0, 6)
-    settingsLayout.Parent = SettingsFrame
-
-    -- Add padding
-    for _, frame in pairs({ScriptsFrame, ToolsFrame, SettingsFrame}) do
         local padding = Instance.new("UIPadding")
         padding.PaddingTop = UDim.new(0, 6)
         padding.PaddingBottom = UDim.new(0, 6)
         padding.PaddingLeft = UDim.new(0, 6)
         padding.PaddingRight = UDim.new(0, 6)
-        padding.Parent = frame
+        padding.Parent = f
+
+        return f
     end
 
-    -- Tab logic
+    local ScriptsFrame = makeContentFrame(true)
+    local ToolsFrame = makeContentFrame(false)
+    local SettingsFrame = makeContentFrame(false)
+
+    -- Tab switching
     local tabs = {}
-    local frames = {
-        Scripts = ScriptsFrame,
-        Tools = ToolsFrame,
-        Settings = SettingsFrame
-    }
-    local activeTab = nil
+    local frames = { Scripts = ScriptsFrame, Tools = ToolsFrame, Settings = SettingsFrame }
 
     local function switchTab(tabName)
         for name, frame in pairs(frames) do
@@ -356,17 +440,19 @@ local function createMainMenu()
                 btn.TextColor3 = Color3.fromRGB(150, 150, 170)
             end
         end
-        activeTab = tabName
     end
 
-    local tabNames = {"Scripts", "Tools", "Settings"}
-    local tabDisplay = {Scripts = "📜 Scripts", Tools = "🔧 Tools", Settings = "⚙ Settings"}
+    local tabData = {
+        {key = "Scripts", display = "📜 Scripts"},
+        {key = "Tools",   display = "🔧 Tools"},
+        {key = "Settings",display = "⚙ Settings"}
+    }
 
-    for _, name in ipairs(tabNames) do
+    for _, td in ipairs(tabData) do
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0, 105, 0, 28)
         btn.BackgroundColor3 = Color3.fromRGB(35, 35, 52)
-        btn.Text = tabDisplay[name]
+        btn.Text = td.display
         btn.TextColor3 = Color3.fromRGB(150, 150, 170)
         btn.Font = Enum.Font.GothamSemibold
         btn.TextSize = 12
@@ -374,9 +460,9 @@ local function createMainMenu()
         btn.AutoButtonColor = false
         btn.Parent = TabBar
         AddCorner(btn, 7)
-        tabs[name] = btn
+        tabs[td.key] = btn
         btn.MouseButton1Click:Connect(function()
-            switchTab(name)
+            switchTab(td.key)
         end)
     end
 
@@ -386,16 +472,17 @@ local function createMainMenu()
     SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
         local query = string.lower(SearchBox.Text)
         for _, child in pairs(ScriptsFrame:GetChildren()) do
-            if child:IsA("TextButton") then
-                if query == "" then
-                    child.Visible = true
-                else
-                    child.Visible = string.find(string.lower(child.Text), query) ~= nil
+            if child:IsA("TextButton") or child:IsA("Frame") then
+                local nameL = child:FindFirstChild("NameLabel")
+                if nameL then
+                    child.Visible = query == "" or
+                        string.find(string.lower(nameL.Text), query) ~= nil
                 end
             end
         end
     end)
 
+    -- Drag on title bar moves MainFrame
     MakeDraggable(MainFrame)
 
     return {
@@ -410,55 +497,7 @@ local function createMainMenu()
 end
 
 --=============================
--- MINI BAR (when minimized)
---=============================
-local function createMiniBar()
-    if miniBar then miniBar:Destroy() end
-
-    miniBar = Instance.new("Frame")
-    miniBar.Size = UDim2.new(0, 50, 0, 50)
-    miniBar.Position = UDim2.new(0, 10, 0.5, -25)
-    miniBar.BackgroundColor3 = Color3.fromRGB(22, 22, 35)
-    miniBar.BorderSizePixel = 0
-    miniBar.Parent = mainScreenGui
-    AddCorner(miniBar, 25)
-    AddShadow(miniBar)
-
-    local expandBtn = Instance.new("TextButton")
-    expandBtn.Size = UDim2.new(1, 0, 1, 0)
-    expandBtn.BackgroundTransparency = 1
-    expandBtn.Text = "⚡"
-    expandBtn.TextSize = 22
-    expandBtn.TextColor3 = Color3.fromRGB(130, 170, 255)
-    expandBtn.Font = Enum.Font.GothamBold
-    expandBtn.Parent = miniBar
-
-    expandBtn.MouseButton1Click:Connect(function()
-        menuElements.MainFrame.Visible = true
-        menuElements.MainFrame.Size = UDim2.new(0, 0, 0, 0)
-        SmoothSize(menuElements.MainFrame, UDim2.new(0, 440, 0, 420), 0.4)
-        miniBar:Destroy()
-    end)
-
-    -- Pulsing animation
-    task.spawn(function()
-        while miniBar and miniBar.Parent do
-            local t1 = TweenService:Create(miniBar, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
-                Size = UDim2.new(0, 54, 0, 54)
-            })
-            t1:Play(); t1.Completed:Wait()
-            local t2 = TweenService:Create(miniBar, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
-                Size = UDim2.new(0, 50, 0, 50)
-            })
-            t2:Play(); t2.Completed:Wait()
-        end
-    end)
-
-    MakeDraggable(miniBar)
-end
-
---=============================
--- CREATE SCRIPT BUTTON
+-- SCRIPT BUTTON
 --=============================
 local function createScriptButton(parent, scriptData, index)
     local button = Instance.new("TextButton")
@@ -470,7 +509,6 @@ local function createScriptButton(parent, scriptData, index)
     button.Parent = parent
     AddCorner(button, 8)
 
-    -- Accent bar
     local accent = Instance.new("Frame")
     accent.Size = UDim2.new(0, 4, 0.6, 0)
     accent.Position = UDim2.new(0, 0, 0.2, 0)
@@ -479,7 +517,6 @@ local function createScriptButton(parent, scriptData, index)
     accent.Parent = button
     AddCorner(accent, 2)
 
-    -- Index number
     local numLabel = Instance.new("TextLabel")
     numLabel.Size = UDim2.new(0, 30, 1, 0)
     numLabel.Position = UDim2.new(0, 12, 0, 0)
@@ -490,8 +527,8 @@ local function createScriptButton(parent, scriptData, index)
     numLabel.TextSize = 16
     numLabel.Parent = button
 
-    -- Script name
     local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
     nameLabel.Size = UDim2.new(1, -100, 1, 0)
     nameLabel.Position = UDim2.new(0, 46, 0, 0)
     nameLabel.BackgroundTransparency = 1
@@ -503,7 +540,6 @@ local function createScriptButton(parent, scriptData, index)
     nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
     nameLabel.Parent = button
 
-    -- Run icon
     local runIcon = Instance.new("TextLabel")
     runIcon.Size = UDim2.new(0, 36, 0, 28)
     runIcon.Position = UDim2.new(1, -46, 0.5, -14)
@@ -516,7 +552,6 @@ local function createScriptButton(parent, scriptData, index)
     runIcon.Parent = button
     AddCorner(runIcon, 6)
 
-    -- Hover effects
     button.MouseEnter:Connect(function()
         SmoothColor(button, Color3.fromRGB(42, 42, 65), 0.2)
         SmoothColor(accent, Color3.fromRGB(100, 160, 255), 0.2)
@@ -527,7 +562,6 @@ local function createScriptButton(parent, scriptData, index)
     end)
 
     button.MouseButton1Click:Connect(function()
-        -- Click feedback
         SmoothColor(button, Color3.fromRGB(50, 180, 100), 0.1)
         nameLabel.Text = "⏳ Loading..."
         task.delay(0.15, function()
@@ -540,7 +574,7 @@ local function createScriptButton(parent, scriptData, index)
             Notify("✅ Success", scriptData.Name .. " executed!", 3)
         else
             nameLabel.Text = "❌ " .. scriptData.Name
-            Notify("❌ Error", "Failed to run: " .. scriptData.Name, 4)
+            Notify("❌ Error", "Failed: " .. scriptData.Name, 4)
         end
         task.delay(2, function()
             if nameLabel and nameLabel.Parent then
@@ -551,7 +585,7 @@ local function createScriptButton(parent, scriptData, index)
 end
 
 --=============================
--- CREATE TOGGLE BUTTON (for tools)
+-- TOGGLE TOOL
 --=============================
 local function createToolToggle(parent, name, description, callback)
     local holder = Instance.new("Frame")
@@ -583,7 +617,6 @@ local function createToolToggle(parent, name, description, callback)
     descLabel.TextXAlignment = Enum.TextXAlignment.Left
     descLabel.Parent = holder
 
-    -- Toggle UI
     local toggleBG = Instance.new("Frame")
     toggleBG.Size = UDim2.new(0, 44, 0, 22)
     toggleBG.Position = UDim2.new(1, -56, 0.5, -11)
@@ -631,7 +664,7 @@ local function createToolToggle(parent, name, description, callback)
 end
 
 --=============================
--- CREATE ACTION BUTTON (for one-click tools)
+-- ACTION BUTTON TOOL
 --=============================
 local function createToolButton(parent, name, description, callback)
     local holder = Instance.new("Frame")
@@ -682,7 +715,6 @@ local function createToolButton(parent, name, description, callback)
     actionBtn.MouseLeave:Connect(function()
         SmoothColor(actionBtn, Color3.fromRGB(80, 100, 200), 0.2)
     end)
-
     actionBtn.MouseButton1Click:Connect(function()
         SmoothColor(actionBtn, Color3.fromRGB(50, 180, 100), 0.1)
         task.delay(0.3, function()
@@ -701,79 +733,128 @@ local function createToolButton(parent, name, description, callback)
 end
 
 --=============================
--- SCRIPT LIST (merged from both)
+-- SCRIPT LIST
 --=============================
 local Scripts = {
-    { Name = "99 Nights in the Forest", Run = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Rx1m/CpsHub/refs/heads/main/Hub"))() end },
-    { Name = "Jump & Teleport", Run = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Vaffuncolo/SPEED/main/TPnJump.lua"))() end },
-    { Name = "Escape Tsunami", Run = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Ratkinator/RatX/refs/heads/main/Loader.lua"))() end },
-    { Name = "Brainrot Farming", Run = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/ywxoofc/LoaderNew/refs/heads/main/loader.lua"))() end },
-    { Name = "JinHub Brainrot", Run = function() loadstring(game:HttpGet("https://jinhub.my.id/scripts/BrainrotEvolution.lua"))() end },
-    { Name = "Speed Hack", Run = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Vaffuncolo/SPEED/main/Speed.lua"))() end },
-    { Name = "NoClip (Walk through walls)", Run = function()
+    {Name = "99 Nights in the Forest", Run = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Rx1m/CpsHub/refs/heads/main/Hub"))()
+    end},
+    {Name = "Jump & Teleport", Run = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Vaffuncolo/SPEED/main/TPnJump.lua"))()
+    end},
+    {Name = "Escape Tsunami", Run = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Ratkinator/RatX/refs/heads/main/Loader.lua"))()
+    end},
+    {Name = "Brainrot Farming", Run = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/ywxoofc/LoaderNew/refs/heads/main/loader.lua"))()
+    end},
+    {Name = "JinHub Brainrot", Run = function()
+        loadstring(game:HttpGet("https://jinhub.my.id/scripts/BrainrotEvolution.lua"))()
+    end},
+    {Name = "Speed Hack", Run = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Vaffuncolo/SPEED/main/Speed.lua"))()
+    end},
+    {Name = "NoClip (Walk through walls)", Run = function()
         local char = LocalPlayer.Character
         RunService.Stepped:Connect(function()
             if char then
                 for _, v in pairs(char:GetDescendants()) do
-                    if v:IsA("BasePart") then
-                        v.CanCollide = false
-                    end
+                    if v:IsA("BasePart") then v.CanCollide = false end
                 end
             end
         end)
-    end },
-    { Name = "Anti AFK", Run = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Vaffuncolo/SPEED/main/AFK.lua"))() end },
-    { Name = "Brainrot Evolution Teleport", Run = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/gumanba/Scripts/main/BrainrotEvolution"))() end },
-    { Name = "Break Your Bones", Run = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/gumanba/Scripts/main/BreakyourBones"))() end },
-    { Name = "Flying Boot/Wing", Run = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/gumanba/Scripts/main/FlyingWings"))() end },
+    end},
+    {Name = "Anti AFK", Run = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Vaffuncolo/SPEED/main/AFK.lua"))()
+    end},
+    {Name = "Brainrot Evolution Teleport", Run = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/gumanba/Scripts/main/BrainrotEvolution"))()
+    end},
+    {Name = "Break Your Bones", Run = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/gumanba/Scripts/main/BreakyourBones"))()
+    end},
+    {Name = "Flying Boot/Wing", Run = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/gumanba/Scripts/main/FlyingWings"))()
+    end},
 }
 
 --=============================
--- TOOL IMPLEMENTATIONS
+-- TOOL FUNCTIONS
 --=============================
--- NoClip (toggle with loop cleanup)
 local function setupNoClip()
-    if noclipConnection then noclipConnection:Disconnect() end
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
     if noclipEnabled then
         noclipConnection = RunService.Stepped:Connect(function()
             local char = LocalPlayer.Character
             if char then
                 for _, v in pairs(char:GetDescendants()) do
-                    if v:IsA("BasePart") then
-                        v.CanCollide = false
-                    end
+                    if v:IsA("BasePart") then v.CanCollide = false end
                 end
             end
         end)
     end
 end
 
--- FullBright toggle
 local function setFullBright(enabled)
     if enabled then
         originalLighting.Brightness = Lighting.Brightness
+        originalLighting.ClockTime = Lighting.ClockTime
+        originalLighting.FogEnd = Lighting.FogEnd
         originalLighting.GlobalShadows = Lighting.GlobalShadows
         Lighting.Brightness = 3
         Lighting.ClockTime = 14
         Lighting.FogEnd = 100000
         Lighting.GlobalShadows = false
-        local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
-        if atmosphere then atmosphere.Density = 0 end
+        local atm = Lighting:FindFirstChildOfClass("Atmosphere")
+        if atm then atm.Density = 0 end
     else
         Lighting.Brightness = originalLighting.Brightness
+        Lighting.ClockTime = originalLighting.ClockTime
+        Lighting.FogEnd = originalLighting.FogEnd
         Lighting.GlobalShadows = originalLighting.GlobalShadows
     end
 end
 
--- Infinite jump handler (already connected globally)
--- We will enable/disable via the toggle callback
+-- FREEZE: Anchor HumanoidRootPart at current position
+local function setupFreeze()
+    if freezeConnection then
+        freezeConnection:Disconnect()
+        freezeConnection = nil
+    end
+    if freezeEnabled then
+        local char = LocalPlayer.Character
+        if char then
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                frozenPosition = hrp.CFrame
+                freezeConnection = RunService.Heartbeat:Connect(function()
+                    local c = LocalPlayer.Character
+                    if c and frozenPosition then
+                        local root = c:FindFirstChild("HumanoidRootPart")
+                        if root then
+                            root.CFrame = frozenPosition
+                            root.Velocity = Vector3.new(0, 0, 0)
+                            root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                            root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                        end
+                    end
+                end)
+            end
+        end
+    else
+        frozenPosition = nil
+    end
+end
 
 --=============================
--- INITIALIZE UI & POPULATE
+-- BUILD THE UI
 --=============================
 menuElements = createMainMenu()
 
--- Add script buttons
+-- Populate scripts
 for i, scriptData in ipairs(Scripts) do
     createScriptButton(menuElements.ScriptsFrame, scriptData, i)
 end
@@ -791,9 +872,16 @@ createToolToggle(menuElements.ToolsFrame, "💡 FullBright", "Maximum brightness
     Notify("FullBright", enabled and "Enabled" or "Disabled", 2)
 end)
 
-createToolToggle(menuElements.ToolsFrame, "🦘 Infinite Jump", "Jump repeatedly in air", function(enabled)
+createToolToggle(menuElements.ToolsFrame, "🦘 Infinite Jump", "Jump in mid-air", function(enabled)
     infiniteJumpEnabled = enabled
     Notify("Infinite Jump", enabled and "Enabled (press Space)" or "Disabled", 2)
+end)
+
+-- NEW: Freeze toggle
+createToolToggle(menuElements.ToolsFrame, "🧊 Freeze", "Lock character in current position", function(enabled)
+    freezeEnabled = enabled
+    setupFreeze()
+    Notify("Freeze", enabled and "Character frozen!" or "Character unfrozen!", 2)
 end)
 
 -- Tools: Action buttons
@@ -813,7 +901,7 @@ createToolButton(menuElements.ToolsFrame, "💀 Reset Character", "Kill your cha
     Notify("Reset", "Character reset", 2)
 end)
 
-createToolButton(menuElements.ToolsFrame, "📋 Copy Game ID", "Copy place ID to clipboard", function()
+createToolButton(menuElements.ToolsFrame, "📋 Copy Game ID", "Copy place ID", function()
     if setclipboard then
         setclipboard(tostring(game.PlaceId))
         Notify("Copied", "Game ID: " .. game.PlaceId, 2)
@@ -823,11 +911,14 @@ createToolButton(menuElements.ToolsFrame, "📋 Copy Game ID", "Copy place ID to
 end)
 
 createToolButton(menuElements.ToolsFrame, "📸 Server Info", "Show server details", function()
-    local info = "Game: " .. game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
-    info = info .. "\nPlayers: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers
-    info = info .. "\nPlace ID: " .. game.PlaceId
-    info = info .. "\nJob ID: " .. string.sub(game.JobId, 1, 12) .. "..."
-    Notify("Server Info", info, 6)
+    local ok, info = pcall(function()
+        local pInfo = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
+        return "Game: " .. pInfo.Name
+            .. "\nPlayers: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers
+            .. "\nPlace ID: " .. game.PlaceId
+            .. "\nJob ID: " .. string.sub(game.JobId, 1, 12) .. "..."
+    end)
+    Notify("Server Info", ok and info or "Could not fetch info", 6)
 end)
 
 -- Settings tab
@@ -841,75 +932,55 @@ local function createSettingsLabel(parent, text)
     label.TextSize = 14
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = parent
-    return label
 end
 
-createSettingsLabel(menuElements.SettingsFrame, "ℹ️ Unified Script Hub v2.0")
-createSettingsLabel(menuElements.SettingsFrame, "👤 Player: " .. LocalPlayer.Name)
-createSettingsLabel(menuElements.SettingsFrame, "🎮 Game ID: " .. tostring(game.PlaceId))
+createSettingsLabel(menuElements.SettingsFrame, "ℹ️  Unified Script Hub v2.1")
+createSettingsLabel(menuElements.SettingsFrame, "👤  Player: " .. LocalPlayer.Name)
+createSettingsLabel(menuElements.SettingsFrame, "🎮  Game ID: " .. tostring(game.PlaceId))
 
 createToolButton(menuElements.SettingsFrame, "🗑️ Destroy Menu", "Remove GUI completely", function()
-    if miniBar then miniBar:Destroy() end
-    if mainScreenGui then mainScreenGui:Destroy() end
-    -- Also disconnect NoClip loop if running
     if noclipConnection then noclipConnection:Disconnect() end
-end)
-
-createToolButton(menuElements.SettingsFrame, "🔄 Reload Menu", "Re-create the GUI", function()
+    if freezeConnection then freezeConnection:Disconnect() end
     if miniBar then miniBar:Destroy() end
     if mainScreenGui then mainScreenGui:Destroy() end
-    task.delay(0.5, function()
-        -- Re-run the whole script (simple reload by re-executing)
-        -- In practice, we can just recall creation functions.
-        menuElements = createMainMenu()
-        for i, scriptData in ipairs(Scripts) do
-            createScriptButton(menuElements.ScriptsFrame, scriptData, i)
-        end
-        -- Re-create tool toggles (simplified: just re-run the setup above)
-        -- For brevity, we'll just notify that manual re-add is needed.
-        Notify("Reload", "GUI recreated. Tools need re-enabling.", 3)
-    end)
 end)
 
 --=============================
--- KEYBOARD SHORTCUTS
+-- KEYBOARD SHORTCUT
 --=============================
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.RightControl or input.KeyCode == Enum.KeyCode.F6 then
+    if input.KeyCode == Enum.KeyCode.RightControl
+        or input.KeyCode == Enum.KeyCode.F6 then
         if menuElements and menuElements.MainFrame then
             if menuElements.MainFrame.Visible then
-                -- Minimize
                 SmoothSize(menuElements.MainFrame, UDim2.new(0, 0, 0, 0), 0.35)
                 task.delay(0.35, function()
                     menuElements.MainFrame.Visible = false
                     createMiniBar()
                 end)
             else
-                -- Restore
                 menuElements.MainFrame.Visible = true
                 menuElements.MainFrame.Size = UDim2.new(0, 0, 0, 0)
                 SmoothSize(menuElements.MainFrame, UDim2.new(0, 440, 0, 420), 0.4)
                 if miniBar then miniBar:Destroy() end
+                miniBar = nil
             end
         end
     end
 end)
 
--- Infinite jump listener
+-- Infinite Jump listener
 UserInputService.JumpRequest:Connect(function()
     if infiniteJumpEnabled then
         local char = LocalPlayer.Character
         if char then
-            local humanoid = char:FindFirstChildOfClass("Humanoid")
-            if humanoid and humanoid:GetState() ~= Enum.HumanoidStateType.Jumping then
-                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
             end
         end
     end
 end)
 
---=============================
--- STARTUP NOTIFICATION
---=============================
-Notify("⚡ Unified Script Hub", "Loaded! Press RightCtrl or F6 to open/close", 5)
+Notify("⚡ Unified Script Hub", "Loaded! RightCtrl or F6 to toggle", 5)
