@@ -1,10 +1,12 @@
 --[[
-    Unified Script Hub v2.1 - Fixed & Enhanced
+    Unified Script Hub v2.2 - Fixed Dragging + Smaller Size
     Fixes:
-    - Minimize & Close buttons now properly connected
-    - Mini bar draggable (drag on frame, not just button)
-    - Added Freeze tool (anchors character in place)
-    - Proper cleanup of all connections
+    - Drag system completely rewritten (no Tween during drag)
+    - TitleBar drags MainFrame
+    - MiniBar fully draggable
+    - Size reduced by 20% (440x420 -> 352x336)
+    - Freeze tool included
+    - All connections properly cleaned up
 --]]
 
 local Players = game:GetService("Players")
@@ -32,6 +34,10 @@ local freezeEnabled = false
 local noclipConnection = nil
 local freezeConnection = nil
 local frozenPosition = nil
+
+-- Menu size constants (20% smaller than original 440x420)
+local MENU_WIDTH = 352
+local MENU_HEIGHT = 336
 
 local originalLighting = {
     Brightness = Lighting.Brightness,
@@ -87,37 +93,35 @@ local function SmoothColor(obj, targetColor, duration)
 end
 
 --=============================
--- DRAG SYSTEM
+-- DRAG SYSTEM (FIXED - No Tween, direct position update)
 --=============================
-local function MakeDraggable(frame)
+local function MakeDraggable(dragHandle, moveTarget)
+    local frameToMove = moveTarget or dragHandle
     local dragging = false
-    local dragInput, dragStart, startPos
+    local dragStart, startPos
 
-    frame.InputBegan:Connect(function(input)
+    dragHandle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
-            startPos = frame.Position
-            input.Changed:Connect(function()
+            startPos = frameToMove.Position
+
+            local conn
+            conn = input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
+                    if conn then conn:Disconnect() end
                 end
             end)
         end
     end)
 
-    frame.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement
-            or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-
     UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
             local delta = input.Position - dragStart
-            frame.Position = UDim2.new(
+            frameToMove.Position = UDim2.new(
                 startPos.X.Scale, startPos.X.Offset + delta.X,
                 startPos.Y.Scale, startPos.Y.Offset + delta.Y
             )
@@ -169,17 +173,17 @@ local function createMiniBar()
     AddCorner(miniBar, 25)
     AddShadow(miniBar)
 
-    -- Make the frame itself draggable FIRST
-    MakeDraggable(miniBar)
+    -- Make frame draggable FIRST
+    MakeDraggable(miniBar, miniBar)
 
-    -- The expand button sits on top but does NOT block drag
+    -- Expand button (smaller than frame so drag area exists around edges)
     local expandBtn = Instance.new("TextButton")
     expandBtn.Name = "ExpandBtn"
-    expandBtn.Size = UDim2.new(0.8, 0, 0.8, 0)
-    expandBtn.Position = UDim2.new(0.1, 0, 0.1, 0)
+    expandBtn.Size = UDim2.new(0.7, 0, 0.7, 0)
+    expandBtn.Position = UDim2.new(0.15, 0, 0.15, 0)
     expandBtn.BackgroundTransparency = 1
     expandBtn.Text = "⚡"
-    expandBtn.TextSize = 20
+    expandBtn.TextSize = 18
     expandBtn.TextColor3 = Color3.fromRGB(130, 170, 255)
     expandBtn.Font = Enum.Font.GothamBold
     expandBtn.Parent = miniBar
@@ -188,7 +192,7 @@ local function createMiniBar()
         if menuElements and menuElements.MainFrame then
             menuElements.MainFrame.Visible = true
             menuElements.MainFrame.Size = UDim2.new(0, 0, 0, 0)
-            SmoothSize(menuElements.MainFrame, UDim2.new(0, 440, 0, 420), 0.4)
+            SmoothSize(menuElements.MainFrame, UDim2.new(0, MENU_WIDTH, 0, MENU_HEIGHT), 0.4)
         end
         if miniBar then miniBar:Destroy() end
         miniBar = nil
@@ -230,7 +234,7 @@ local function createMainMenu()
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     mainScreenGui = ScreenGui
 
-    -- Main frame
+    -- Main frame (starts at size 0 for pop-up animation)
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
     MainFrame.Size = UDim2.new(0, 0, 0, 0)
@@ -244,21 +248,22 @@ local function createMainMenu()
     AddCorner(MainFrame, 14)
     AddShadow(MainFrame)
 
+    -- Pop-up animation with new smaller size
     task.delay(0.05, function()
-        SmoothSize(MainFrame, UDim2.new(0, 440, 0, 420), 0.5)
+        SmoothSize(MainFrame, UDim2.new(0, MENU_WIDTH, 0, MENU_HEIGHT), 0.5)
     end)
 
-    -- Title bar (used for dragging)
+    -- Title bar (THIS is the drag handle)
     local TitleBar = Instance.new("Frame")
     TitleBar.Name = "TitleBar"
-    TitleBar.Size = UDim2.new(1, 0, 0, 48)
+    TitleBar.Size = UDim2.new(1, 0, 0, 42)
     TitleBar.BackgroundColor3 = Color3.fromRGB(22, 22, 35)
     TitleBar.BorderSizePixel = 0
     TitleBar.Active = true
     TitleBar.Parent = MainFrame
     AddCorner(TitleBar, 14)
 
-    -- Bottom fix for title bar corners
+    -- Bottom fix for title bar rounded corners
     local TitleBarFix = Instance.new("Frame")
     TitleBarFix.Size = UDim2.new(1, 0, 0, 14)
     TitleBarFix.Position = UDim2.new(0, 0, 1, -14)
@@ -267,12 +272,12 @@ local function createMainMenu()
     TitleBarFix.Parent = TitleBar
 
     local TitleLabel = Instance.new("TextLabel")
-    TitleLabel.Size = UDim2.new(1, -120, 1, 0)
-    TitleLabel.Position = UDim2.new(0, 16, 0, 0)
+    TitleLabel.Size = UDim2.new(1, -100, 1, 0)
+    TitleLabel.Position = UDim2.new(0, 14, 0, 0)
     TitleLabel.BackgroundTransparency = 1
-    TitleLabel.Text = "⚡ Unified Script Hub"
+    TitleLabel.Text = "⚡ Script Hub"
     TitleLabel.TextColor3 = Color3.fromRGB(130, 170, 255)
-    TitleLabel.TextSize = 18
+    TitleLabel.TextSize = 16
     TitleLabel.Font = Enum.Font.GothamBold
     TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
     TitleLabel.Parent = TitleBar
@@ -280,18 +285,18 @@ local function createMainMenu()
     -- Minimize button
     local MinimizeButton = Instance.new("TextButton")
     MinimizeButton.Name = "MinBtn"
-    MinimizeButton.Size = UDim2.new(0, 32, 0, 32)
-    MinimizeButton.Position = UDim2.new(1, -76, 0, 8)
+    MinimizeButton.Size = UDim2.new(0, 28, 0, 28)
+    MinimizeButton.Position = UDim2.new(1, -66, 0, 7)
     MinimizeButton.Text = "—"
     MinimizeButton.BackgroundColor3 = Color3.fromRGB(50, 55, 75)
     MinimizeButton.TextColor3 = Color3.fromRGB(200, 200, 220)
     MinimizeButton.Font = Enum.Font.GothamBold
-    MinimizeButton.TextSize = 16
+    MinimizeButton.TextSize = 14
     MinimizeButton.BorderSizePixel = 0
     MinimizeButton.AutoButtonColor = false
     MinimizeButton.ZIndex = 10
     MinimizeButton.Parent = TitleBar
-    AddCorner(MinimizeButton, 8)
+    AddCorner(MinimizeButton, 7)
 
     MinimizeButton.MouseEnter:Connect(function()
         SmoothColor(MinimizeButton, Color3.fromRGB(70, 75, 100), 0.2)
@@ -303,18 +308,18 @@ local function createMainMenu()
     -- Close button
     local CloseButton = Instance.new("TextButton")
     CloseButton.Name = "CloseBtn"
-    CloseButton.Size = UDim2.new(0, 32, 0, 32)
-    CloseButton.Position = UDim2.new(1, -40, 0, 8)
+    CloseButton.Size = UDim2.new(0, 28, 0, 28)
+    CloseButton.Position = UDim2.new(1, -34, 0, 7)
     CloseButton.Text = "✕"
     CloseButton.BackgroundColor3 = Color3.fromRGB(180, 50, 60)
     CloseButton.TextColor3 = Color3.new(1, 1, 1)
     CloseButton.Font = Enum.Font.GothamBold
-    CloseButton.TextSize = 14
+    CloseButton.TextSize = 12
     CloseButton.BorderSizePixel = 0
     CloseButton.AutoButtonColor = false
     CloseButton.ZIndex = 10
     CloseButton.Parent = TitleBar
-    AddCorner(CloseButton, 8)
+    AddCorner(CloseButton, 7)
 
     CloseButton.MouseEnter:Connect(function()
         SmoothColor(CloseButton, Color3.fromRGB(220, 60, 70), 0.2)
@@ -323,9 +328,7 @@ local function createMainMenu()
         SmoothColor(CloseButton, Color3.fromRGB(180, 50, 60), 0.2)
     end)
 
-    -------------------------------------------------
-    -- FIX: Connect Minimize & Close RIGHT HERE
-    -------------------------------------------------
+    -- Connect Minimize & Close buttons
     MinimizeButton.MouseButton1Click:Connect(function()
         SmoothSize(MainFrame, UDim2.new(0, 0, 0, 0), 0.35)
         task.delay(0.35, function()
@@ -346,53 +349,53 @@ local function createMainMenu()
 
     -- Search bar
     local SearchBar = Instance.new("Frame")
-    SearchBar.Size = UDim2.new(1, -24, 0, 34)
-    SearchBar.Position = UDim2.new(0, 12, 0, 54)
+    SearchBar.Size = UDim2.new(1, -20, 0, 30)
+    SearchBar.Position = UDim2.new(0, 10, 0, 48)
     SearchBar.BackgroundColor3 = Color3.fromRGB(28, 28, 42)
     SearchBar.BorderSizePixel = 0
     SearchBar.Parent = MainFrame
     AddCorner(SearchBar, 8)
 
     local SearchIcon = Instance.new("TextLabel")
-    SearchIcon.Size = UDim2.new(0, 28, 1, 0)
+    SearchIcon.Size = UDim2.new(0, 26, 1, 0)
     SearchIcon.Position = UDim2.new(0, 4, 0, 0)
     SearchIcon.BackgroundTransparency = 1
     SearchIcon.Text = "🔍"
-    SearchIcon.TextSize = 13
+    SearchIcon.TextSize = 12
     SearchIcon.Font = Enum.Font.Gotham
     SearchIcon.Parent = SearchBar
 
     local SearchBox = Instance.new("TextBox")
-    SearchBox.Size = UDim2.new(1, -40, 1, 0)
-    SearchBox.Position = UDim2.new(0, 34, 0, 0)
+    SearchBox.Size = UDim2.new(1, -36, 1, 0)
+    SearchBox.Position = UDim2.new(0, 30, 0, 0)
     SearchBox.BackgroundTransparency = 1
     SearchBox.PlaceholderText = "Search scripts..."
     SearchBox.PlaceholderColor3 = Color3.fromRGB(100, 100, 130)
     SearchBox.Text = ""
     SearchBox.TextColor3 = Color3.new(1, 1, 1)
     SearchBox.Font = Enum.Font.Gotham
-    SearchBox.TextSize = 14
+    SearchBox.TextSize = 13
     SearchBox.TextXAlignment = Enum.TextXAlignment.Left
     SearchBox.ClearTextOnFocus = false
     SearchBox.Parent = SearchBar
 
     -- Tab bar
     local TabBar = Instance.new("Frame")
-    TabBar.Size = UDim2.new(1, -24, 0, 32)
-    TabBar.Position = UDim2.new(0, 12, 0, 94)
+    TabBar.Size = UDim2.new(1, -20, 0, 28)
+    TabBar.Position = UDim2.new(0, 10, 0, 82)
     TabBar.BackgroundTransparency = 1
     TabBar.Parent = MainFrame
 
     local TabLayout = Instance.new("UIListLayout")
     TabLayout.FillDirection = Enum.FillDirection.Horizontal
-    TabLayout.Padding = UDim.new(0, 6)
+    TabLayout.Padding = UDim.new(0, 5)
     TabLayout.Parent = TabBar
 
-    -- Content frames
+    -- Content frame builder
     local function makeContentFrame(visible)
         local f = Instance.new("ScrollingFrame")
-        f.Size = UDim2.new(1, -24, 1, -140)
-        f.Position = UDim2.new(0, 12, 0, 132)
+        f.Size = UDim2.new(1, -20, 1, -120)
+        f.Position = UDim2.new(0, 10, 0, 114)
         f.BackgroundColor3 = Color3.fromRGB(22, 22, 34)
         f.BackgroundTransparency = 0.3
         f.BorderSizePixel = 0
@@ -406,14 +409,14 @@ local function createMainMenu()
         AddCorner(f, 10)
 
         local layout = Instance.new("UIListLayout")
-        layout.Padding = UDim.new(0, 6)
+        layout.Padding = UDim.new(0, 5)
         layout.Parent = f
 
         local padding = Instance.new("UIPadding")
-        padding.PaddingTop = UDim.new(0, 6)
-        padding.PaddingBottom = UDim.new(0, 6)
-        padding.PaddingLeft = UDim.new(0, 6)
-        padding.PaddingRight = UDim.new(0, 6)
+        padding.PaddingTop = UDim.new(0, 5)
+        padding.PaddingBottom = UDim.new(0, 5)
+        padding.PaddingLeft = UDim.new(0, 5)
+        padding.PaddingRight = UDim.new(0, 5)
         padding.Parent = f
 
         return f
@@ -425,7 +428,7 @@ local function createMainMenu()
 
     -- Tab switching
     local tabs = {}
-    local frames = { Scripts = ScriptsFrame, Tools = ToolsFrame, Settings = SettingsFrame }
+    local frames = {Scripts = ScriptsFrame, Tools = ToolsFrame, Settings = SettingsFrame}
 
     local function switchTab(tabName)
         for name, frame in pairs(frames) do
@@ -444,18 +447,18 @@ local function createMainMenu()
 
     local tabData = {
         {key = "Scripts", display = "📜 Scripts"},
-        {key = "Tools",   display = "🔧 Tools"},
-        {key = "Settings",display = "⚙ Settings"}
+        {key = "Tools", display = "🔧 Tools"},
+        {key = "Settings", display = "⚙ Settings"}
     }
 
     for _, td in ipairs(tabData) do
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, 105, 0, 28)
+        btn.Size = UDim2.new(0, 90, 0, 24)
         btn.BackgroundColor3 = Color3.fromRGB(35, 35, 52)
         btn.Text = td.display
         btn.TextColor3 = Color3.fromRGB(150, 150, 170)
         btn.Font = Enum.Font.GothamSemibold
-        btn.TextSize = 12
+        btn.TextSize = 11
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false
         btn.Parent = TabBar
@@ -472,7 +475,7 @@ local function createMainMenu()
     SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
         local query = string.lower(SearchBox.Text)
         for _, child in pairs(ScriptsFrame:GetChildren()) do
-            if child:IsA("TextButton") or child:IsA("Frame") then
+            if child:IsA("TextButton") then
                 local nameL = child:FindFirstChild("NameLabel")
                 if nameL then
                     child.Visible = query == "" or
@@ -482,8 +485,8 @@ local function createMainMenu()
         end
     end)
 
-    -- Drag on title bar moves MainFrame
-    MakeDraggable(MainFrame)
+    -- DRAG: TitleBar is the handle, MainFrame moves
+    MakeDraggable(TitleBar, MainFrame)
 
     return {
         ScreenGui = ScreenGui,
@@ -501,7 +504,7 @@ end
 --=============================
 local function createScriptButton(parent, scriptData, index)
     local button = Instance.new("TextButton")
-    button.Size = UDim2.new(1, -4, 0, 44)
+    button.Size = UDim2.new(1, -4, 0, 38)
     button.BackgroundColor3 = Color3.fromRGB(32, 32, 50)
     button.BorderSizePixel = 0
     button.Text = ""
@@ -510,7 +513,7 @@ local function createScriptButton(parent, scriptData, index)
     AddCorner(button, 8)
 
     local accent = Instance.new("Frame")
-    accent.Size = UDim2.new(0, 4, 0.6, 0)
+    accent.Size = UDim2.new(0, 3, 0.6, 0)
     accent.Position = UDim2.new(0, 0, 0.2, 0)
     accent.BackgroundColor3 = Color3.fromRGB(80, 130, 255)
     accent.BorderSizePixel = 0
@@ -518,36 +521,36 @@ local function createScriptButton(parent, scriptData, index)
     AddCorner(accent, 2)
 
     local numLabel = Instance.new("TextLabel")
-    numLabel.Size = UDim2.new(0, 30, 1, 0)
-    numLabel.Position = UDim2.new(0, 12, 0, 0)
+    numLabel.Size = UDim2.new(0, 26, 1, 0)
+    numLabel.Position = UDim2.new(0, 10, 0, 0)
     numLabel.BackgroundTransparency = 1
     numLabel.Text = tostring(index)
     numLabel.TextColor3 = Color3.fromRGB(80, 130, 255)
     numLabel.Font = Enum.Font.GothamBold
-    numLabel.TextSize = 16
+    numLabel.TextSize = 14
     numLabel.Parent = button
 
     local nameLabel = Instance.new("TextLabel")
     nameLabel.Name = "NameLabel"
-    nameLabel.Size = UDim2.new(1, -100, 1, 0)
-    nameLabel.Position = UDim2.new(0, 46, 0, 0)
+    nameLabel.Size = UDim2.new(1, -85, 1, 0)
+    nameLabel.Position = UDim2.new(0, 38, 0, 0)
     nameLabel.BackgroundTransparency = 1
     nameLabel.Text = scriptData.Name
     nameLabel.TextColor3 = Color3.fromRGB(220, 220, 240)
     nameLabel.Font = Enum.Font.GothamSemibold
-    nameLabel.TextSize = 13
+    nameLabel.TextSize = 12
     nameLabel.TextXAlignment = Enum.TextXAlignment.Left
     nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
     nameLabel.Parent = button
 
     local runIcon = Instance.new("TextLabel")
-    runIcon.Size = UDim2.new(0, 36, 0, 28)
-    runIcon.Position = UDim2.new(1, -46, 0.5, -14)
+    runIcon.Size = UDim2.new(0, 32, 0, 24)
+    runIcon.Position = UDim2.new(1, -40, 0.5, -12)
     runIcon.BackgroundColor3 = Color3.fromRGB(50, 180, 100)
     runIcon.BackgroundTransparency = 0.2
     runIcon.Text = "▶"
     runIcon.TextColor3 = Color3.new(1, 1, 1)
-    runIcon.TextSize = 12
+    runIcon.TextSize = 11
     runIcon.Font = Enum.Font.GothamBold
     runIcon.Parent = button
     AddCorner(runIcon, 6)
@@ -589,49 +592,49 @@ end
 --=============================
 local function createToolToggle(parent, name, description, callback)
     local holder = Instance.new("Frame")
-    holder.Size = UDim2.new(1, -4, 0, 52)
+    holder.Size = UDim2.new(1, -4, 0, 46)
     holder.BackgroundColor3 = Color3.fromRGB(32, 32, 50)
     holder.BorderSizePixel = 0
     holder.Parent = parent
     AddCorner(holder, 8)
 
     local nameLabel = Instance.new("TextLabel")
-    nameLabel.Size = UDim2.new(1, -80, 0, 24)
-    nameLabel.Position = UDim2.new(0, 14, 0, 5)
+    nameLabel.Size = UDim2.new(1, -70, 0, 22)
+    nameLabel.Position = UDim2.new(0, 12, 0, 4)
     nameLabel.BackgroundTransparency = 1
     nameLabel.Text = name
     nameLabel.TextColor3 = Color3.fromRGB(220, 220, 240)
     nameLabel.Font = Enum.Font.GothamBold
-    nameLabel.TextSize = 13
+    nameLabel.TextSize = 12
     nameLabel.TextXAlignment = Enum.TextXAlignment.Left
     nameLabel.Parent = holder
 
     local descLabel = Instance.new("TextLabel")
-    descLabel.Size = UDim2.new(1, -80, 0, 16)
-    descLabel.Position = UDim2.new(0, 14, 0, 28)
+    descLabel.Size = UDim2.new(1, -70, 0, 14)
+    descLabel.Position = UDim2.new(0, 12, 0, 25)
     descLabel.BackgroundTransparency = 1
     descLabel.Text = description
     descLabel.TextColor3 = Color3.fromRGB(120, 120, 150)
     descLabel.Font = Enum.Font.Gotham
-    descLabel.TextSize = 11
+    descLabel.TextSize = 10
     descLabel.TextXAlignment = Enum.TextXAlignment.Left
     descLabel.Parent = holder
 
     local toggleBG = Instance.new("Frame")
-    toggleBG.Size = UDim2.new(0, 44, 0, 22)
-    toggleBG.Position = UDim2.new(1, -56, 0.5, -11)
+    toggleBG.Size = UDim2.new(0, 40, 0, 20)
+    toggleBG.Position = UDim2.new(1, -52, 0.5, -10)
     toggleBG.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
     toggleBG.BorderSizePixel = 0
     toggleBG.Parent = holder
-    AddCorner(toggleBG, 11)
+    AddCorner(toggleBG, 10)
 
     local toggleCircle = Instance.new("Frame")
-    toggleCircle.Size = UDim2.new(0, 18, 0, 18)
-    toggleCircle.Position = UDim2.new(0, 2, 0.5, -9)
+    toggleCircle.Size = UDim2.new(0, 16, 0, 16)
+    toggleCircle.Position = UDim2.new(0, 2, 0.5, -8)
     toggleCircle.BackgroundColor3 = Color3.fromRGB(180, 180, 200)
     toggleCircle.BorderSizePixel = 0
     toggleCircle.Parent = toggleBG
-    AddCorner(toggleCircle, 9)
+    AddCorner(toggleCircle, 8)
 
     local toggled = false
     local toggleBtn = Instance.new("TextButton")
@@ -644,11 +647,11 @@ local function createToolToggle(parent, name, description, callback)
         toggled = not toggled
         if toggled then
             SmoothColor(toggleBG, Color3.fromRGB(70, 170, 110), 0.25)
-            SmoothPosition(toggleCircle, UDim2.new(1, -20, 0.5, -9), 0.25)
+            SmoothPosition(toggleCircle, UDim2.new(1, -18, 0.5, -8), 0.25)
             SmoothColor(toggleCircle, Color3.new(1, 1, 1), 0.25)
         else
             SmoothColor(toggleBG, Color3.fromRGB(60, 60, 80), 0.25)
-            SmoothPosition(toggleCircle, UDim2.new(0, 2, 0.5, -9), 0.25)
+            SmoothPosition(toggleCircle, UDim2.new(0, 2, 0.5, -8), 0.25)
             SmoothColor(toggleCircle, Color3.fromRGB(180, 180, 200), 0.25)
         end
         callback(toggled)
@@ -668,42 +671,42 @@ end
 --=============================
 local function createToolButton(parent, name, description, callback)
     local holder = Instance.new("Frame")
-    holder.Size = UDim2.new(1, -4, 0, 52)
+    holder.Size = UDim2.new(1, -4, 0, 46)
     holder.BackgroundColor3 = Color3.fromRGB(32, 32, 50)
     holder.BorderSizePixel = 0
     holder.Parent = parent
     AddCorner(holder, 8)
 
     local nameLabel = Instance.new("TextLabel")
-    nameLabel.Size = UDim2.new(1, -80, 0, 24)
-    nameLabel.Position = UDim2.new(0, 14, 0, 5)
+    nameLabel.Size = UDim2.new(1, -70, 0, 22)
+    nameLabel.Position = UDim2.new(0, 12, 0, 4)
     nameLabel.BackgroundTransparency = 1
     nameLabel.Text = name
     nameLabel.TextColor3 = Color3.fromRGB(220, 220, 240)
     nameLabel.Font = Enum.Font.GothamBold
-    nameLabel.TextSize = 13
+    nameLabel.TextSize = 12
     nameLabel.TextXAlignment = Enum.TextXAlignment.Left
     nameLabel.Parent = holder
 
     local descLabel = Instance.new("TextLabel")
-    descLabel.Size = UDim2.new(1, -80, 0, 16)
-    descLabel.Position = UDim2.new(0, 14, 0, 28)
+    descLabel.Size = UDim2.new(1, -70, 0, 14)
+    descLabel.Position = UDim2.new(0, 12, 0, 25)
     descLabel.BackgroundTransparency = 1
     descLabel.Text = description
     descLabel.TextColor3 = Color3.fromRGB(120, 120, 150)
     descLabel.Font = Enum.Font.Gotham
-    descLabel.TextSize = 11
+    descLabel.TextSize = 10
     descLabel.TextXAlignment = Enum.TextXAlignment.Left
     descLabel.Parent = holder
 
     local actionBtn = Instance.new("TextButton")
-    actionBtn.Size = UDim2.new(0, 50, 0, 26)
-    actionBtn.Position = UDim2.new(1, -62, 0.5, -13)
+    actionBtn.Size = UDim2.new(0, 44, 0, 22)
+    actionBtn.Position = UDim2.new(1, -56, 0.5, -11)
     actionBtn.BackgroundColor3 = Color3.fromRGB(80, 100, 200)
     actionBtn.Text = "Run"
     actionBtn.TextColor3 = Color3.new(1, 1, 1)
     actionBtn.Font = Enum.Font.GothamBold
-    actionBtn.TextSize = 11
+    actionBtn.TextSize = 10
     actionBtn.BorderSizePixel = 0
     actionBtn.AutoButtonColor = false
     actionBtn.Parent = holder
@@ -818,7 +821,6 @@ local function setFullBright(enabled)
     end
 end
 
--- FREEZE: Anchor HumanoidRootPart at current position
 local function setupFreeze()
     if freezeConnection then
         freezeConnection:Disconnect()
@@ -877,7 +879,6 @@ createToolToggle(menuElements.ToolsFrame, "🦘 Infinite Jump", "Jump in mid-air
     Notify("Infinite Jump", enabled and "Enabled (press Space)" or "Disabled", 2)
 end)
 
--- NEW: Freeze toggle
 createToolToggle(menuElements.ToolsFrame, "🧊 Freeze", "Lock character in current position", function(enabled)
     freezeEnabled = enabled
     setupFreeze()
@@ -924,17 +925,17 @@ end)
 -- Settings tab
 local function createSettingsLabel(parent, text)
     local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, -4, 0, 30)
+    label.Size = UDim2.new(1, -4, 0, 26)
     label.BackgroundTransparency = 1
     label.Text = text
     label.TextColor3 = Color3.fromRGB(130, 170, 255)
     label.Font = Enum.Font.GothamBold
-    label.TextSize = 14
+    label.TextSize = 12
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = parent
 end
 
-createSettingsLabel(menuElements.SettingsFrame, "ℹ️  Unified Script Hub v2.1")
+createSettingsLabel(menuElements.SettingsFrame, "ℹ️  Script Hub v2.2")
 createSettingsLabel(menuElements.SettingsFrame, "👤  Player: " .. LocalPlayer.Name)
 createSettingsLabel(menuElements.SettingsFrame, "🎮  Game ID: " .. tostring(game.PlaceId))
 
@@ -946,7 +947,7 @@ createToolButton(menuElements.SettingsFrame, "🗑️ Destroy Menu", "Remove GUI
 end)
 
 --=============================
--- KEYBOARD SHORTCUT
+-- KEYBOARD SHORTCUT (RightCtrl or F6)
 --=============================
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
@@ -962,7 +963,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
             else
                 menuElements.MainFrame.Visible = true
                 menuElements.MainFrame.Size = UDim2.new(0, 0, 0, 0)
-                SmoothSize(menuElements.MainFrame, UDim2.new(0, 440, 0, 420), 0.4)
+                SmoothSize(menuElements.MainFrame, UDim2.new(0, MENU_WIDTH, 0, MENU_HEIGHT), 0.4)
                 if miniBar then miniBar:Destroy() end
                 miniBar = nil
             end
@@ -983,4 +984,4 @@ UserInputService.JumpRequest:Connect(function()
     end
 end)
 
-Notify("⚡ Unified Script Hub", "Loaded! RightCtrl or F6 to toggle", 5)
+Notify("⚡ Script Hub", "Loaded! RightCtrl or F6 to toggle", 5)
