@@ -776,6 +776,9 @@ local Scripts = {
     {Name = "Break Your Bones", Run = function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/gumanba/Scripts/main/BreakyourBones"))()
     end},
+    {Name = "BrainrotEvolution keyless", Run = function()
+        loadstring(game:HttpGet('https://pastebin.com/raw/hUGqeR78'))()
+    end},
     {Name = "Flying Boot/Wing", Run = function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/gumanba/Scripts/main/FlyingWings"))()
     end},
