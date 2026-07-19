@@ -779,6 +779,9 @@ local Scripts = {
     {Name = "BrainrotEvolution keyless", Run = function()
         loadstring(game:HttpGet('https://pastebin.com/raw/hUGqeR78'))()
     end},
+    {Name = "Keyboard Map", Run = function()
+        loadstring(game:HttpGet("https://www.luxyhub.space/api/loader/luxyhub"))()
+    end},
     {Name = "Flying Boot/Wing", Run = function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/gumanba/Scripts/main/FlyingWings"))()
     end},
